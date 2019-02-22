@@ -56,15 +56,13 @@ class LanguagePairDataset(Dataset):
                 dest_sent, source_sent = row.strip().split('\t')
                 src_words = normalizeString(source_sent).strip().split()
                 dst_words = normalizeString(dest_sent).strip().split()
-                max_sent_len = max_sent_len if max_sent_len > len(src_words) else len(src_words)
-                max_sent_len = max_sent_len if max_sent_len > len(dst_words) else len(dst_words)
+                max_sent_len = max(max_sent_len, len(src_words), len(dst_words))
                 if (self.max_length < 1 or
                         (len(src_words) < self.max_length and
                          len(dst_words) < self.max_length)):
                     self.add_sentence(src_words, key='source')
                     self.add_sentence(dst_words, key='dest')
                     self._items.append((src_words, dst_words))
-
             if self.max_length < 0:
                 self.max_length = max_sent_len
 
