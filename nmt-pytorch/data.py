@@ -32,7 +32,8 @@ EOS_token = 1
 
 
 class LanguagePairDataset(Dataset):
-    def __init__(self, source, source_lang, dest_lang, max_length=-1):
+    def __init__(self, source, source_lang, dest_lang, max_length=-1,
+                 reverse=False):
         self.lang = {'source': source_lang, 'dest': dest_lang}
         p = Path(source).expanduser()
         assert p.exists()
@@ -46,9 +47,9 @@ class LanguagePairDataset(Dataset):
         self.n_words = {'source': 2, 'dest': 2}  # Count SOS and EOS
 
         self._items = []
-        self._load_data(self.source)
+        self._load_data(self.source, reverse=reverse)
 
-    def _load_data(self, fname):
+    def _load_data(self, fname, reverse=False):
         logger.info(f'Loading {self.__class__} from {self.source}')
         with open(fname, 'r') as fh:
             max_sent_len = 0
@@ -60,9 +61,14 @@ class LanguagePairDataset(Dataset):
                 if (self.max_length < 1 or
                         (len(src_words) < self.max_length and
                          len(dst_words) < self.max_length)):
-                    self.add_sentence(src_words, key='source')
-                    self.add_sentence(dst_words, key='dest')
-                    self._items.append((src_words, dst_words))
+                    if reverse:
+                        self.add_sentence(dst_words, key='source')
+                        self.add_sentence(src_words, key='dest')
+                        self._items.append((dst_words, src_words))
+                    else:
+                        self.add_sentence(src_words, key='source')
+                        self.add_sentence(dst_words, key='dest')
+                        self._items.append((src_words, dst_words))
             if self.max_length < 0:
                 self.max_length = max_sent_len
 

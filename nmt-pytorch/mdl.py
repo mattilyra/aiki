@@ -14,7 +14,7 @@ from data import LanguagePairDataset, SOS_token, EOS_token
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MAX_LENGTH = 10
 
-teacher_forcing_ratio = 0.0
+teacher_forcing_ratio = 0.5
 
 logger = logging.getLogger(__name__)
 

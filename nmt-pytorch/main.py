@@ -36,7 +36,7 @@ parser.add_argument('--n-hidden-dec', type=int, default=64)
 parser.add_argument('--max-sentence-length', type=int, default=12)
 parser.add_argument('--print-every', type=int, default=1000)
 parser.add_argument('--no-attention', action='store_true', default=False)
-parser.add_argument('--dropout', type=float, default=0.1)
+parser.add_argument('--dropout-p', type=float, default=0.1)
 
 
 def train(input_tensor, target_tensor,
@@ -67,29 +67,24 @@ def train(input_tensor, target_tensor,
 
     use_teacher_forcing = random.random() < teacher_forcing_ratio
 
-    if use_teacher_forcing:
-        # Teacher forcing: Feed the target as the next input
-        for di in range(target_length):
-            if isinstance(decoder, AttnDecoderRNN):
-                dec_output, dec_hidden, dec_attn = decoder(
-                    dec_input, dec_hidden, encoder_outputs)
-                loss += criterion(dec_output, target_tensor[di])
-                decoder_input = target_tensor[di]  # Teacher forcing
-
-    else:
-        # Without teacher forcing: use its own predictions as the next input
-        for di in range(target_length):
-            dec_output, dec_hidden, dec_attn = decoder(dec_input,
-                                                       dec_hidden,
-                                                       encoder_outputs)
-            topv, topi = dec_output.topk(1)
-            decoder_input = topi.squeeze().detach()  # detach from history as input
+    for di in range(target_length):
+        if isinstance(decoder, AttnDecoderRNN):
+            dec_output, dec_hidden, dec_attn = decoder(
+                dec_input, dec_hidden, encoder_outputs)
             loss += criterion(dec_output, target_tensor[di])
-            if decoder_input.item() == EOS_token:
-                break
+            if use_teacher_forcing:
+                # Teacher forcing: Feed the target as the next input
+                dec_input = target_tensor[di]  # Teacher forcing
+            else:
+                # Without teacher forcing: use the network's own predictions
+                # as the next input
+                topv, topi = dec_output.topk(1)
+                # detach from history as input
+                dec_input = topi.squeeze().detach()  
+                if dec_input.item() == EOS_token:
+                    break
 
     loss.backward()
-
     encoder_optimizer.step()
     decoder_optimizer.step()
 
@@ -197,7 +192,12 @@ if __name__ == '__main__':
     if args.n_hidden_enc != args.n_hidden_dec:
         raise NotImplementedError('Different hidden sizes is not'
                                   ' currently supported.')
-    source_path = Path(args.data_directory) / f'{args.source_lang}.txt'
+    if args.source_lang == 'eng':
+        source_path = Path(args.data_directory) / f'{args.dest_lang}.txt'
+        reverse = True
+    else:
+        source_path = Path(args.data_directory) / f'{args.source_lang}.txt'
+        reverse = False
     dataset = LanguagePairDataset(source_path, args.source_lang,
                                   args.dest_lang,
                                   max_length=args.max_sentence_length)
@@ -208,12 +208,14 @@ if __name__ == '__main__':
     encoder = EncoderRNN(input_size=dataset.n_words['source'],
                          hidden_size=args.n_hidden_enc).to(DEVICE)
     if not args.no_attention:
+        logger.info('Using decoder with attention.')
         decoder = AttnDecoderRNN(hidden_size=args.n_hidden_dec,
                                  output_size=dataset.n_words['dest'],
-                                 dropout_p=args.dropout,
+                                 dropout_p=args.dropout_p,
                                  max_length=args.max_sentence_length)
         decoder = decoder.to(DEVICE)
     else:
+        logger.info('Using decoder without attention.')
         decoder = DecoderRNN(hidden_size=args.n_hidden_dec,
                              output_size=dataset.n_words['dest'],
                              max_length=args.max_sentence_length).to(DEVICE)
