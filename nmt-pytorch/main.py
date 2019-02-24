@@ -1,3 +1,5 @@
+import bz2
+import pickle
 import argparse
 import time
 import sys
@@ -9,6 +11,7 @@ from pathlib import Path
 import torch
 from torch import optim, nn
 from sklearn import model_selection, metrics
+from ctlearn.datamodel import pytorch_corpus
 
 from data import LanguagePairDataset, SOS_token, EOS_token
 from mdl import (EncoderRNN, DecoderRNN, AttnDecoderRNN, DEVICE, MAX_LENGTH,
@@ -28,9 +31,7 @@ def _source_dir(dir_path):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--source-lang', required=True, type=str)
-parser.add_argument('--dest-lang', required=True, type=str)
-parser.add_argument('--data-directory', default='./data/', type=_source_dir)
+parser.add_argument('--data', type=_source_dir)
 parser.add_argument('--n-iter', type=int, default=50)
 parser.add_argument('--n-hidden-enc', type=int, default=64)
 parser.add_argument('--n-hidden-dec', type=int, default=64)
@@ -181,22 +182,35 @@ def decode(encoder, decoder, input_tensor, max_length=MAX_LENGTH):
         return decoded_words, decoder_attentions[:di + 1]
 
 
-def train_evaluate_cv(dataset, cv):
+def train_evaluate_cv(dataset, cv, n_train_iter):
     predictions = []
     targets = []
     for trn, tst in cv.split(range(len(dataset))):
         encoder = EncoderRNN(input_size=dataset.n_words['source'],
-                             hidden_size=128).to(DEVICE)
+                             hidden_size=128)
         decoder = AttnDecoderRNN(hidden_size=128, output_size=dataset.n_words['dest'],
                                  dropout_p=0.15, max_length=dataset.max_length)
-        trainIters(dataset, encoder, decoder, 500, print_every=100,
+
+        encoder.to(DEVICE)
+        decoder.to(DEVICE)
+        trn = [idx for idx in trn if dataset.gate[idx] == 1]
+        trainIters(dataset, encoder, decoder, n_train_iter, print_every=100,
                    max_length=dataset.max_length, train_idx=trn)
+        targets_ = []
+        pred_ = []
         for idx in tst:
             x, y = dataset.get_tensors(idx)
             output_idx, attn = decode(encoder, decoder, x,
                                       max_length=dataset.max_length)
-            targets.append(y[0][0].item())
-            predictions.append(output_idx[0].item())
+            targets_.append(y[0][0].item())
+            pred_.append(output_idx[0])
+
+        names, labels = zip(*[(l, n) for l, n in dataset.word2index['dest'].items() if n > 2])
+        print(metrics.classification_report(targets_, pred_,
+                                            labels=labels,
+                                            target_names=names))
+        targets.extend(targets_)
+        predictions.extend(pred_)
     return targets, predictions
 
 
@@ -219,20 +233,17 @@ if __name__ == '__main__':
     if args.n_hidden_enc != args.n_hidden_dec:
         raise NotImplementedError('Different hidden sizes is not'
                                   ' currently supported.')
-    if args.source_lang == 'eng':
-        source_path = Path(args.data_directory) / f'{args.dest_lang}.txt'
-        reverse = True
-    else:
-        source_path = Path(args.data_directory) / f'{args.source_lang}.txt'
-        reverse = False
 
-    with bz2.open(args.source_path, 'rb') as fh:
+    with bz2.open(args.data, 'rb') as fh:
         cache = pickle.load(fh)
     dataset = pytorch_corpus.CTCorpus(cache, truncate=200)
     logger.info(f'Loaded dataset with {len(dataset)} items.')
     
     cv = model_selection.KFold(n_splits=10, shuffle=True, random_state=934875)
-    y, pred = train_evaluate_cv(dataset, cv)
+    y, pred = train_evaluate_cv(dataset, cv, n_train_iter=args.n_iter)
     
-    print(metrics.classification_report(y, pred))
+    names, labels = zip(*[(l, n) for l, n in dataset.word2index['dest'].items() if n > 2])
+    print(metrics.classification_report(y, pred,
+                                        labels=labels,
+                                        target_names=names))
 
