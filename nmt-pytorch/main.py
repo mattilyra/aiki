@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 from torch import optim, nn
+from sklearn import model_selection, metrics
 
 from data import LanguagePairDataset, SOS_token, EOS_token
 from mdl import (EncoderRNN, DecoderRNN, AttnDecoderRNN, DEVICE, MAX_LENGTH,
@@ -180,10 +181,10 @@ def decode(encoder, decoder, input_tensor, max_length=MAX_LENGTH):
         return decoded_words, decoder_attentions[:di + 1]
 
 
-def train_evaluate_cv(enc, dec, dataset, cv):
+def train_evaluate_cv(dataset, cv):
     predictions = []
     targets = []
-    for trn, tst in cv.split(len(dataset)):
+    for trn, tst in cv.split(range(len(dataset))):
         encoder = EncoderRNN(input_size=dataset.n_words['source'],
                              hidden_size=128).to(DEVICE)
         decoder = AttnDecoderRNN(hidden_size=128, output_size=dataset.n_words['dest'],
@@ -224,29 +225,14 @@ if __name__ == '__main__':
     else:
         source_path = Path(args.data_directory) / f'{args.source_lang}.txt'
         reverse = False
-    dataset = LanguagePairDataset(source_path, args.source_lang,
-                                  args.dest_lang,
-                                  max_length=args.max_sentence_length)
 
+    with bz2.open(args.source_path, 'rb') as fh:
+        cache = pickle.load(fh)
+    dataset = pytorch_corpus.CTCorpus(cache, truncate=200)
     logger.info(f'Loaded dataset with {len(dataset)} items.')
-    logger.info(f'Random sentence pair: "{random.choice(dataset)}"')
+    
+    cv = model_selection.KFold(n_splits=10, shuffle=True, random_state=934875)
+    y, pred = train_evaluate_cv(dataset, cv)
+    
+    print(metrics.classification_report(y, pred))
 
-    encoder = EncoderRNN(input_size=dataset.n_words['source'],
-                         hidden_size=args.n_hidden_enc).to(DEVICE)
-    if not args.no_attention:
-        logger.info('Using decoder with attention.')
-        decoder = AttnDecoderRNN(hidden_size=args.n_hidden_dec,
-                                 output_size=dataset.n_words['dest'],
-                                 dropout_p=args.dropout_p,
-                                 max_length=args.max_sentence_length)
-        decoder = decoder.to(DEVICE)
-    else:
-        logger.info('Using decoder without attention.')
-        decoder = DecoderRNN(hidden_size=args.n_hidden_dec,
-                             output_size=dataset.n_words['dest'],
-                             max_length=args.max_sentence_length).to(DEVICE)
-    trainIters(dataset, encoder, decoder, args.n_iter,
-               print_every=args.print_every,
-               max_length=args.max_sentence_length)
-
-    evaluateRandomly(encoder, decoder, dataset)
