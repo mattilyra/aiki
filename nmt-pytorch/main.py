@@ -60,7 +60,10 @@ def train(input_tensor, target_tensor,
                                                  encoder_hidden)
         if isinstance(decoder, AttnDecoderRNN):
             # store the encoder outputs for each time step for attention
-            encoder_outputs[ei] = encoder_output[0, 0]
+            try:
+                encoder_outputs[ei] = encoder_output[0, 0]
+            except IndexError:
+                print(input_length, ei, encoder_outputs.size())
 
     dec_input = torch.tensor([[SOS_token]], device=DEVICE)
     dec_hidden = encoder_hidden
@@ -80,7 +83,7 @@ def train(input_tensor, target_tensor,
                 # as the next input
                 topv, topi = dec_output.topk(1)
                 # detach from history as input
-                dec_input = topi.squeeze().detach()  
+                dec_input = topi.squeeze().detach()
                 if dec_input.item() == EOS_token:
                     break
 
@@ -107,7 +110,7 @@ def timeSince(since, percent):
 
 def trainIters(dataset, encoder, decoder, n_iters,
                print_every=1000, plot_every=100, learning_rate=0.01,
-               max_length=MAX_LENGTH):
+               max_length=MAX_LENGTH, train_idx=None):
     start = time.time()
     plot_losses = []
     print_loss_total = 0  # Reset every print_every
@@ -115,8 +118,12 @@ def trainIters(dataset, encoder, decoder, n_iters,
 
     encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
-    training_pairs = [dataset.get_tensors(i)
-                      for i in random.sample(range(len(dataset)), k=n_iters)]
+    N = len(dataset)
+    if train_idx is None:
+        training_pairs = [dataset.get_tensors(i)
+                          for i in random.sample(range(N), k=n_iters)]
+    else:
+        training_pairs = [dataset.get_tensors(i) for i in train_idx]
     criterion = nn.NLLLoss()
 
     for i_itr in range(0, n_iters):
@@ -173,14 +180,33 @@ def decode(encoder, decoder, input_tensor, max_length=MAX_LENGTH):
         return decoded_words, decoder_attentions[:di + 1]
 
 
-def evaluateRandomly(encoder, decoder, dataset, n=10):
+def train_evaluate_cv(enc, dec, dataset, cv):
+    predictions = []
+    targets = []
+    for trn, tst in cv.split(len(dataset)):
+        encoder = EncoderRNN(input_size=dataset.n_words['source'],
+                             hidden_size=128).to(DEVICE)
+        decoder = AttnDecoderRNN(hidden_size=128, output_size=dataset.n_words['dest'],
+                                 dropout_p=0.15, max_length=dataset.max_length)
+        trainIters(dataset, encoder, decoder, 500, print_every=100,
+                   max_length=dataset.max_length, train_idx=trn)
+        for idx in tst:
+            x, y = dataset.get_tensors(idx)
+            output_idx, attn = decode(encoder, decoder, x,
+                                      max_length=dataset.max_length)
+            targets.append(y[0][0].item())
+            predictions.append(output_idx[0].item())
+    return targets, predictions
+
+
+def evaluateRandomly(encoder, decoder, dataset, n=10, max_length=MAX_LENGTH):
     for i in range(n):
         idx = random.choice(range(len(dataset)))
         pair = dataset[idx]
         src, dst = dataset.get_tensors(idx)
-        print('>', pair[0])
+        #print('>', pair[0])
         print('=', pair[1])
-        output_idx, attn = decode(encoder, decoder, src, max_length=dataset.max_length)
+        output_idx, attn = decode(encoder, decoder, src, max_length=max_length)
         output_words = [dataset.index2word['dest'].get(wi, 'UNK') for wi in output_idx]
         output_sentence = ' '.join(output_words + ['<EOS>'])
         print('<', output_sentence)

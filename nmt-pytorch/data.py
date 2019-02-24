@@ -39,15 +39,16 @@ class LanguagePairDataset(Dataset):
         assert p.exists()
         self.source = p
         self.max_length = max_length
+        self._init()
+        self._load_data(self.source, reverse=reverse)
 
+    def _init(self):
         self.word2index = {'source': {}, 'dest': {}}
         self.word2count = {'source': {}, 'dest': {}}
         self.index2word = {'source': {SOS_token: "SOS", EOS_token: "EOS"},
                            'dest': {SOS_token: "SOS", EOS_token: "EOS"}}
         self.n_words = {'source': 2, 'dest': 2}  # Count SOS and EOS
-
         self._items = []
-        self._load_data(self.source, reverse=reverse)
 
     def _load_data(self, fname, reverse=False):
         logger.info(f'Loading {self.__class__} from {self.source}')
@@ -98,4 +99,3 @@ class LanguagePairDataset(Dataset):
 
     def __getitem__(self, idx):
         return self._items[idx]
-
